@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Overrides
+docker-compose.override.yml
+compose.override.yaml
+
+# Local agent config
+AGENTS.md
+.claude/
+.agents/
+opencode.json
+
+# Secret env files
+.firecrawl.env
+.production_ssh.env
+.secrets.env
+
+# Firecrawl fetch cache
+.firecrawl/
