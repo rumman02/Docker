@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "omniroute": {
+      "type": "http",
+      "url": "https://omniroute.example.com/api/mcp/stream",
+      "headers": {
+        "Authorization": "Bearer sk-0000000000000000-000000-00000000"
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+name: omniroute
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+services:
+  omniroute:
+    image: ${OMNIROUTE_IMAGE_REPO:?}:${OMNIROUTE_IMAGE_TAG:?}
+    container_name: omniroute
+    restart: unless-stopped
+    stop_grace_period: 40s
+    environment:
+      TZ: ${TZ}
+      JWT_SECRET: ${JWT_SECRET:?}
+      API_KEY_SECRET: ${API_KEY_SECRET:?}
+      STORAGE_ENCRYPTION_KEY: ${STORAGE_ENCRYPTION_KEY:?}
+      INITIAL_PASSWORD: ${INITIAL_PASSWORD:?}
+      REDIS_URL: ${OMNIROUTE_REDIS_URL:?}
+      DATA_DIR: ${OMNIROUTE_DATA_DIR}
+      NODE_ENV: ${OMNIROUTE_NODE_ENV}
+      STORAGE_ENCRYPTION_KEY_VERSION: ${STORAGE_ENCRYPTION_KEY_VERSION}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL}
+      BASE_URL: ${OMNIROUTE_PUBLIC_BASE_URL}
+      NEXT_PUBLIC_BASE_URL: ${OMNIROUTE_PUBLIC_BASE_URL}
+      PORT: ${OMNIROUTE_INTERNAL_PORT:?}
+      REDIS_KEY_PREFIX: ${OMNIROUTE_REDIS_KEY_PREFIX:?}
+      REQUIRE_API_KEY: ${REQUIRE_API_KEY:?}
+      ALLOW_API_KEY_REVEAL: ${ALLOW_API_KEY_REVEAL}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY}
+      OMNIROUTE_HEALTHCHECK_PATH: ${OMNIROUTE_HEALTHCHECK_PATH}
+      ARENA_ELO_SYNC_ENABLED: ${ARENA_ELO_SYNC_ENABLED}
+    networks:
+      - redis_net
+      - traefik_net
+      - omniroute_net
+    volumes:
+      - type: volume
+        source: omniroute_data
+        target: /app/data
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${OMNIROUTE_LIMIT_CPUS:?}"
+          memory: "${OMNIROUTE_LIMIT_MEMORY:?}"
+          pids: "${OMNIROUTE_LIMIT_PIDS:?}"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik_net"
+      traefik.http.routers.omniroute-public.rule: "Host(`${OMNIROUTE_HOST:?}`) && PathPrefix(`${OMNIROUTE_PUBLIC_PREFIX_PRIMARY:?}`)"
+      traefik.http.routers.omniroute-public.priority: "100"
+      traefik.http.routers.omniroute-public.entrypoints: "websecure"
+      traefik.http.routers.omniroute-public.tls: "true"
+      traefik.http.routers.omniroute-public.service: "omniroute"
+      traefik.http.routers.omniroute-private.rule: "Host(`${OMNIROUTE_HOST:?}`)"
+      traefik.http.routers.omniroute-private.priority: "10"
+      traefik.http.routers.omniroute-private.entrypoints: "websecure"
+      traefik.http.routers.omniroute-private.middlewares: "tailnet-only@docker"
+      traefik.http.routers.omniroute-private.tls: "true"
+      traefik.http.routers.omniroute-private.service: "omniroute"
+      traefik.http.services.omniroute.loadbalancer.server.port: "${OMNIROUTE_INTERNAL_PORT:?}"
+
+networks:
+  redis_net:
+    external: true
+    name: redis_net
+  traefik_net:
+    external: true
+    name: traefik_net
+  omniroute_net:
+    external: true
+    name: omniroute_net
+
+volumes:
+  omniroute_data:
+    name: omniroute_data
