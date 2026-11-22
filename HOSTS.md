@@ -10,12 +10,14 @@ One `compose.yaml` per stack everywhere; host-specific values live only in each 
 | Docker API socket | `/run/<engine>/docker.sock` | `~/.<engine>/run/docker.sock` |
 | CLI | system `<engine>` / `docker` | links in `~/.<engine>/bin` |
 
+**Socket access — Linux device** (the Mac's VM socket presents `root:root`; no setup needed there): the engine socket requires the connecting process's *user* to be a named member of the socket group — root-equivalent, like `docker` group membership. Add the user once with `sudo usermod -aG <engine> <user>`, run socket_proxy as that uid (`SOCKET_PROXY_USER=<uid>:<gid>` — e.g. the operator's own `1000:<gid>`), and confirm membership with `id <user>`.
+
 ## `.env` differences (network stack)
 
 | Key | Linux | Mac |
 | --- | --- | --- |
 | `SOCKET_PROXY_DOCKER_SOCKET` | `/run/<engine>/docker.sock` | `~/.<engine>/run/docker.sock` |
-| `SOCKET_PROXY_USER` | `65534:969` (socket group `<engine>`) | `65534:0` (socket presents `root:root` in the VM) |
+| `SOCKET_PROXY_USER` | `1000:<gid>` (uid of a user who is a named member of the socket group `<engine>` — see the socket-access note above) | `65534:0` (socket presents `root:root` in the VM) |
 | `TAILSCALE_IP` | this host's live Tailscale IPv4 | this host's live Tailscale IPv4 |
 
 `TAILSCALE_IP` must match the host's current registration — a fresh Tailscale login gets a new name and IP, so re-check `tailscale ip -4` after any re-auth and update `.env`.

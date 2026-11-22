@@ -23,6 +23,7 @@ First `up` is chatty — one "network with name … was not created for project"
 ```bash
 cd ../network && kcs up -d
 "$DK" ps --format '{{.Names}}: {{.Status}}'   # traefik healthy; tailscale healthy; cloudflared up (only after traefik healthy); coredns up
+"$DK" logs network_traefik 2>&1 | grep -m1 "Failed to retrieve information of the docker client"   # must print NOTHING — if it prints, set SOCKET_PROXY_USER per HOSTS.md (engine socket group membership)
 dig @${TAILSCALE_IP} soa ${DNS_DOMAIN} +short   # from the Mac; needs dig (brew install bind) — answers from the zone file
 ```
 Confirm the Let's Encrypt certs arrived (catches the 502 before it happens):
