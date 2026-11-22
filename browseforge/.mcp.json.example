@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "browseforge": {
+      "type": "http",
+      "url": "https://browseforge.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer 0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+}

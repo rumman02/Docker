@@ -1,0 +1,89 @@
+name: browseforge
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+services:
+  browseforge:
+    image: ghcr.io/nczz/browseforge:${BROWSEFORGE_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: browseforge
+    entrypoint: ["/bin/bash", "-c", "touch /.dockerenv && exec /entrypoint.sh \"$@\"", "--"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      VNC_PASSWORD: ${VNC_PASSWORD:?}
+      BROWSEFORGE_TOKEN: ${BROWSEFORGE_API_TOKEN:?}
+      BROWSEFORGE_SEED_BROWSERS: ${BROWSEFORGE_SEED_BROWSERS}
+      BROWSEFORGE_DOCKER_GPU_MODE: ${BROWSEFORGE_DOCKER_GPU_MODE}
+      BROWSEFORGE_PUBLIC_BASE_URL: ${BROWSEFORGE_PUBLIC_BASE_URL}
+    networks:
+      - traefik_net
+      - browseforge_net
+    volumes:
+      - type: volume
+        source: browseforge_profiles_data
+        target: /app/profiles
+      - type: volume
+        source: browseforge_appdata_data
+        target: /app/data
+      - type: volume
+        source: browseforge_browsers_data
+        target: /app/browsers
+      - type: volume
+        source: browseforge_logs_data
+        target: /app/logs
+      - type: volume
+        source: browseforge_backups_data
+        target: /app/backups
+    healthcheck:
+      test: ["CMD", "/app/BrowseForge", "smoke", "rest", "--base-url", "http://127.0.0.1:${BROWSEFORGE_INTERNAL_PORT:?}", "--json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${BROWSEFORGE_LIMIT_CPUS:?}"
+          memory: "${BROWSEFORGE_LIMIT_MEMORY:?}"
+          pids: "${BROWSEFORGE_LIMIT_PIDS:?}"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik_net"
+      traefik.http.routers.browseforge.rule: "Host(`${BROWSEFORGE_HOST:?}`)"
+      traefik.http.routers.browseforge.entrypoints: "websecure"
+      traefik.http.routers.browseforge.middlewares: "tailnet-only@docker"
+      traefik.http.routers.browseforge.tls: "true"
+      traefik.http.routers.browseforge.service: "browseforge"
+      traefik.http.services.browseforge.loadbalancer.server.port: "${BROWSEFORGE_INTERNAL_PORT:?}"
+      traefik.http.routers.browseforge-vnc.rule: "Host(`${BROWSEFORGE_VNC_HOST:?}`)"
+      traefik.http.routers.browseforge-vnc.entrypoints: "websecure"
+      traefik.http.routers.browseforge-vnc.middlewares: "tailnet-only@docker"
+      traefik.http.routers.browseforge-vnc.tls: "true"
+      traefik.http.routers.browseforge-vnc.service: "browseforge-vnc"
+      traefik.http.services.browseforge-vnc.loadbalancer.server.port: "${BROWSEFORGE_VNC_INTERNAL_PORT:?}"
+
+networks:
+  traefik_net:
+    external: true
+    name: traefik_net
+  browseforge_net:
+    external: true
+    name: browseforge_net
+
+volumes:
+  browseforge_profiles_data:
+    name: browseforge_profiles_data
+  browseforge_appdata_data:
+    name: browseforge_appdata_data
+  browseforge_browsers_data:
+    name: browseforge_browsers_data
+  browseforge_logs_data:
+    name: browseforge_logs_data
+  browseforge_backups_data:
+    name: browseforge_backups_data
