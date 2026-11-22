@@ -1,0 +1,79 @@
+name: net_anchor
+
+services:
+  net_anchor:
+    image: busybox:${NET_ANCHOR_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: net_anchor
+    command: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+    networks:
+      - traefik_net
+      - openwa_net
+      - openclaw_net
+      - omniroute_net
+      - browseforge_net
+      - postiz_net
+      - postgres_net
+      - redis_net
+      - temporal_net
+      - nginx_net
+      - camofox_net
+      - tailscale_net
+      - network_socket_net
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
+    deploy:
+      resources:
+        limits:
+          cpus: "${NET_ANCHOR_LIMIT_CPUS:?}"
+          memory: "${NET_ANCHOR_LIMIT_MEMORY:?}"
+          pids: "${NET_ANCHOR_LIMIT_PIDS:?}"
+
+networks:
+  traefik_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${TRAEFIK_NET_SUBNET:?}
+          gateway: ${TRAEFIK_NET_GATEWAY:?}
+    name: traefik_net
+  openwa_net:
+    driver: bridge
+    name: openwa_net
+  openclaw_net:
+    driver: bridge
+    name: openclaw_net
+  omniroute_net:
+    driver: bridge
+    name: omniroute_net
+  browseforge_net:
+    driver: bridge
+    name: browseforge_net
+  postiz_net:
+    driver: bridge
+    name: postiz_net
+  postgres_net:
+    driver: bridge
+    name: postgres_net
+  redis_net:
+    driver: bridge
+    name: redis_net
+  temporal_net:
+    driver: bridge
+    name: temporal_net
+  nginx_net:
+    driver: bridge
+    name: nginx_net
+  camofox_net:
+    driver: bridge
+    name: camofox_net
+  tailscale_net:
+    driver: bridge
+    name: tailscale_net
+  network_socket_net:
+    driver: bridge
+    name: network_socket_net
