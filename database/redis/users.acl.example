@@ -1,8 +1,8 @@
 user default off
-user admin on >REPLACE_WITH_REDIS_ADMIN_PASSWORD ~* &* +@all
+user admin on >REPLACE_WITH_GENERATED_64HEX_PASSWORD ~* &* +@all
 user healthcheck on >REPLACE_WITH_REDIS_HEALTHCHECK_PASSWORD resetchannels -@all +@connection
-user omniroute on >REPLACE_WITH_REDIS_OMNIROUTE_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
-user openwa on >REPLACE_WITH_REDIS_OPENWA_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub +info
-user n8n_wa_dedupe on >REPLACE_WITH_REDIS_N8N_WA_DEDUPE_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
-user searxng on >REPLACE_WITH_REDIS_SEARXNG_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
-user postiz on >REPLACE_WITH_REDIS_POSTIZ_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub +info
+user omniroute on >REPLACE_WITH_GENERATED_64HEX_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
+user openwa on >REPLACE_WITH_GENERATED_64HEX_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub +info
+user n8n_wa_dedupe on >REPLACE_WITH_GENERATED_64HEX_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
+user searxng on >REPLACE_WITH_GENERATED_64HEX_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub
+user postiz on >REPLACE_WITH_GENERATED_64HEX_PASSWORD resetchannels ~* &* -@all +@connection +@string +@hash +@list +@set +@sortedset +@stream +@hyperloglog +@geo +@keyspace +@transaction +@scripting +@pubsub +info
