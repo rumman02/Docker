@@ -1,0 +1,6 @@
+REPLACE_WITH_DNS_DOMAIN:53 {
+    errors
+    cache 30
+    file /etc/coredns/db.zone
+    bind REPLACE_WITH_TAILSCALE_IP
+}

@@ -1,0 +1,233 @@
+name: network
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+services:
+  traefik:
+    image: traefik:${TRAEFIK_IMAGE_TAG:?}
+    container_name: network_traefik
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      tailscale:
+        condition: service_healthy
+      socket_proxy:
+        condition: service_healthy
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_DOMAINS_0_MAIN: "${BASE_DOMAIN:?}"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_DOMAINS_0_SANS: "*.${BASE_DOMAIN:?}"
+      TZ: ${TZ}
+      CF_DNS_API_TOKEN: ${NETWORK_CF_DNS_API_TOKEN:?}
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: "${NETWORK_ACME_EMAIL}"
+      TRAEFIK_GLOBAL_ALIASHEADERSSTRATEGY: "${TRAEFIK_GLOBAL_ALIASHEADERSSTRATEGY:?}"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":${TRAEFIK_WEBSECURE_INTERNAL_PORT:?}"
+      TRAEFIK_ENTRYPOINTS_TRAEFIK_ADDRESS: ":${TRAEFIK_PING_INTERNAL_PORT:?}"
+      TRAEFIK_PROVIDERS_DOCKER_ENDPOINT: tcp://socket_proxy:${SOCKET_PROXY_INTERNAL_PORT:?}
+      TRAEFIK_LOG_LEVEL: "${TRAEFIK_LOG_LEVEL}"
+      TRAEFIK_ACCESSLOG: "${TRAEFIK_ACCESS_LOG}"
+      TRAEFIK_GLOBAL_CHECKNEWVERSION: "false"
+      TRAEFIK_GLOBAL_SENDANONYMOUSUSAGE: "false"
+      TRAEFIK_PING: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: letsencrypt
+      TRAEFIK_PROVIDERS_DOCKER: "true"
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_PROVIDERS_DOCKER_NETWORK: traefik_net
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_DNSCHALLENGE: "true"
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_DNSCHALLENGE_PROVIDER: cloudflare
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /letsencrypt/acme.json
+    network_mode: "service:tailscale"
+    volumes:
+      - type: volume
+        source: traefik_letsencrypt_data
+        target: /letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--entrypoints.traefik.address=:${TRAEFIK_PING_INTERNAL_PORT:?}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NETWORK_TRAEFIK_LIMIT_CPUS:?}"
+          memory: "${NETWORK_TRAEFIK_LIMIT_MEMORY:?}"
+          pids: "${NETWORK_TRAEFIK_LIMIT_PIDS:?}"
+
+  socket_proxy:
+    image: ghcr.io/wollomatic/socket-proxy:${SOCKET_PROXY_IMAGE_TAG:?}
+    container_name: network_socket_proxy
+    user: "${SOCKET_PROXY_USER:?}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      SP_PROXYPORT: ${SOCKET_PROXY_INTERNAL_PORT:?}
+      SP_ALLOWFROM: ${SOCKET_PROXY_ALLOWFROM:?}
+      SP_SOCKETPATH: "${SOCKET_PROXY_INTERNAL_SOCKET_PATH:?}"
+      SP_SHUTDOWNGRACETIME: ${SOCKET_PROXY_SHUTDOWN_GRACE_TIME:?}
+      SP_LISTENIP: "0.0.0.0"
+      SP_ALLOW_GET: '(/v1\..{1,2}/(version|containers/.*|events.*)|/_ping)'
+      SP_ALLOW_HEAD: "/_ping"
+      SP_ALLOWHEALTHCHECK: "true"
+      SP_WATCHDOGINTERVAL: "3600"
+      SP_STOPONWATCHDOG: "true"
+    networks:
+      - network_socket_net
+    volumes:
+      - type: bind
+        source: ${SOCKET_PROXY_DOCKER_SOCKET:?}
+        target: ${SOCKET_PROXY_INTERNAL_SOCKET_PATH:?}
+        read_only: true
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NETWORK_SOCKET_PROXY_LIMIT_CPUS:?}"
+          memory: "${NETWORK_SOCKET_PROXY_LIMIT_MEMORY:?}"
+          pids: "${NETWORK_SOCKET_PROXY_LIMIT_PIDS:?}"
+
+  tailscale:
+    image: tailscale/tailscale:${TAILSCALE_IMAGE_TAG:?}
+    container_name: network_tailscale
+    hostname: ${NETWORK_TAILSCALE_HOSTNAME}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cap_add:
+      - "${TAILSCALE_CAP_ADD:?}"
+    devices:
+      - "${TAILSCALE_TUN_DEVICE:?}"
+    environment:
+      TS_HOSTNAME: ${NETWORK_TAILSCALE_HOSTNAME}
+      TS_AUTHKEY: ${NETWORK_TS_AUTHKEY:?}
+      TS_USERSPACE: "${TS_USERSPACE:?}"
+      TS_LOCAL_ADDR_PORT: "[::]:${TAILSCALE_HEALTHCHECK_INTERNAL_PORT:?}"
+      TS_AUTH_ONCE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_ENABLE_HEALTH_CHECK: "true"
+    dns:
+      - ${NETWORK_DNS_PRIMARY:?}
+      - ${NETWORK_DNS_SECONDARY:?}
+    networks:
+      traefik_net:
+        aliases:
+          - traefik
+          - coredns
+      network_socket_net:
+      tailscale_net:
+    volumes:
+      - type: volume
+        source: tailscale_state_data
+        target: /var/lib/tailscale
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:${TAILSCALE_HEALTHCHECK_INTERNAL_PORT:?}/healthz && tailscale ip -4 >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NETWORK_TAILSCALE_LIMIT_CPUS:?}"
+          memory: "${NETWORK_TAILSCALE_LIMIT_MEMORY:?}"
+          pids: "${NETWORK_TAILSCALE_LIMIT_PIDS:?}"
+    labels:
+      traefik.enable: "true"
+      traefik.http.middlewares.tailnet-only.ipallowlist.sourcerange: "${TAILNET_ONLY_SOURCE_RANGE:?}"
+      traefik.http.services.tailscale-network.loadbalancer.server.port: "${TAILSCALE_HEALTHCHECK_INTERNAL_PORT:?}"
+
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: network_cloudflared
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "run"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      traefik:
+        condition: service_healthy
+    environment:
+      TUNNEL_TOKEN: ${NETWORK_CLOUDFLARED_TUNNEL_TOKEN:?}
+    networks:
+      - traefik_net
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NETWORK_CLOUDFLARED_LIMIT_CPUS:?}"
+          memory: "${NETWORK_CLOUDFLARED_LIMIT_MEMORY:?}"
+          pids: "${NETWORK_CLOUDFLARED_LIMIT_PIDS:?}"
+
+  coredns:
+    image: coredns/coredns:${COREDNS_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: network_coredns
+    command: ["-conf", "/etc/coredns/Corefile"]
+    restart: unless-stopped
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    configs:
+      - source: corefile
+        target: /etc/coredns/Corefile
+      - source: zone
+        target: /etc/coredns/db.zone
+    network_mode: "service:tailscale"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NETWORK_COREDNS_LIMIT_CPUS:?}"
+          memory: "${NETWORK_COREDNS_LIMIT_MEMORY:?}"
+          pids: "${NETWORK_COREDNS_LIMIT_PIDS:?}"
+
+networks:
+  traefik_net:
+    external: true
+    name: traefik_net
+  network_socket_net:
+    external: true
+    name: network_socket_net
+  tailscale_net:
+    external: true
+    name: tailscale_net
+
+volumes:
+  traefik_letsencrypt_data:
+    name: traefik_letsencrypt_data
+  tailscale_state_data:
+    name: tailscale_state_data
+
+configs:
+  corefile:
+    content: |
+      ${DNS_DOMAIN:?}:${COREDNS_INTERNAL_PORT:?} {
+          bind ${NETWORK_TAILSCALE_IP:?}
+          errors
+          cache 30
+          file /etc/coredns/db.zone
+      }
+  zone:
+    content: |
+      $$ORIGIN ${DNS_DOMAIN:?}.
+      $$TTL 60
+      @   IN  SOA  ns1.${DNS_DOMAIN:?}. admin.${DNS_DOMAIN:?}. (
+              2026103101
+              7200
+              3600
+              1209600
+              60 )
+          IN  NS   ns1.${DNS_DOMAIN:?}.
+      ns1 IN  A    ${NETWORK_TAILSCALE_IP:?}
+      @   IN  A    ${NETWORK_TAILSCALE_IP:?}
+      *   IN  A    ${NETWORK_TAILSCALE_IP:?}
