@@ -1,0 +1,97 @@
+name: database
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: database_postgres
+    command: ["postgres", "-p", "${POSTGRES_INTERNAL_PORT:?}", "-c", "listen_addresses=${POSTGRES_LISTEN_ADDRESSES:?}"]
+    restart: unless-stopped
+    stop_grace_period: 1m
+    environment:
+      TZ: ${TZ}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    env_file: ./postgres/.env.services
+    networks:
+      - postgres_net
+    volumes:
+      - type: volume
+        source: database_postgres_data
+        target: /var/lib/postgresql
+      - type: bind
+        source: ./postgres/initdb.d
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    healthcheck:
+      test: ["CMD", "pg_isready", "-p", "${POSTGRES_INTERNAL_PORT:?}", "-U", "${POSTGRES_USER:?}", "-d", "postgres"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${DATABASE_POSTGRES_LIMIT_CPUS:?}"
+          memory: "${DATABASE_POSTGRES_LIMIT_MEMORY:?}"
+          pids: "${DATABASE_POSTGRES_LIMIT_PIDS:?}"
+
+  redis:
+    image: redis:${REDIS_IMAGE_TAG:?}
+    pull_policy: always
+    container_name: database_redis
+    command: ["redis-server", "--port", "${REDIS_INTERNAL_PORT:?}", "--maxmemory", "${REDIS_MAXMEMORY:?}", "--appendonly", "yes", "--appendfsync", "everysec", "--aclfile", "/usr/local/etc/redis/users.acl"]
+    user: "999:999"
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    environment:
+      REDIS_HEALTHCHECK_PASSWORD: ${REDIS_HEALTHCHECK_PASSWORD:?}
+      REDIS_INTERNAL_PORT: ${REDIS_INTERNAL_PORT:?}
+    networks:
+      - redis_net
+    volumes:
+      - type: volume
+        source: database_redis_data
+        target: /data
+      - type: bind
+        source: ./redis/users.acl
+        target: /usr/local/etc/redis/users.acl
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 -p \"$${REDIS_INTERNAL_PORT}\" --user healthcheck --pass \"$${REDIS_HEALTHCHECK_PASSWORD}\" ping > /dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${DATABASE_REDIS_LIMIT_CPUS:?}"
+          memory: "${DATABASE_REDIS_LIMIT_MEMORY:?}"
+          pids: "${DATABASE_REDIS_LIMIT_PIDS:?}"
+
+networks:
+  postgres_net:
+    external: true
+    name: postgres_net
+  redis_net:
+    external: true
+    name: redis_net
+
+volumes:
+  database_postgres_data:
+    name: database_postgres_data
+  database_redis_data:
+    name: database_redis_data
