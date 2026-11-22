@@ -1,0 +1,86 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!.env.services.example
+!.env.global.example
+!.env.local.example
+
+
+# Docker Compose overrides (local-only)
+docker-compose.override.yml
+compose.override.yml
+
+# Persistent data / bind-mount volumes
+data/
+volumes/
+*/data/
+*/volumes/
+
+# Logs
+*.log
+logs/
+
+# Dumps and backups
+*.sql
+*.sql.gz
+*.dump
+*.bak
+*.bak-*
+*.bak.*
+backups/
+*.tar.gz
+
+# Certificates / keys
+*.pem
+*.key
+*.crt
+!certs/.gitkeep
+
+# Service config files holding live secrets (templates: *.example)
+n8n/credentials.json
+n8n/workflows.json
+redis/users.acl
+database/users.acl
+database/redis/users.acl
+network/coredns/Corefile
+network/coredns/db.zone
+ADMIN_PASSWORD.txt
+camofox/.dashboard/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Local helper scripts output
+tmp/
+
+# AI agent configs & MCP configs
+CLAUDE.md
+.claude/
+.codex/
+.agents/
+.zcode/
+.agent/
+.pi/
+.firecrawl/
+opencode/
+.mcp.json
+!.mcp.json.example
+.mcp/
+.cursor/
+.cursorrules
+.windsurf/
+.gemini/
+.aider*
+.qwen/
+.amp/
+.zed/
+.crushrc
+crushrc
+opencode.json
