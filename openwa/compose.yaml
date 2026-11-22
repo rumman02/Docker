@@ -1,0 +1,131 @@
+name: openwa
+
+services:
+  openwa:
+    image: ${OPENWA_IMAGE_REPO:?}:${OPENWA_IMAGE_TAG:?}
+    container_name: openwa
+    user: "997:997"
+    restart: unless-stopped
+    stop_grace_period: 75s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - KILL
+      - SETGID
+      - SETUID
+    environment:
+      DATABASE_PASSWORD: ${OPENWA_DATABASE_PASSWORD:?}
+      REDIS_PASSWORD: ${OPENWA_REDIS_PASSWORD:?}
+      API_MASTER_KEY: ${OPENWA_API_MASTER_KEY:?}
+      API_KEY_PEPPER: ${OPENWA_API_KEY_PEPPER:?}
+      NODE_ENV: ${OPENWA_NODE_ENV}
+      NODE_OPTIONS: ${OPENWA_NODE_OPTIONS}
+      TZ: ${OPENWA_TZ}
+      LOG_LEVEL: ${OPENWA_LOG_LEVEL}
+      SEARCH_ENABLED: ${OPENWA_SEARCH_ENABLED}
+      DATABASE_TYPE: ${OPENWA_DATABASE_TYPE}
+      POSTGRES_BUILTIN: ${OPENWA_POSTGRES_BUILTIN}
+      DATABASE_HOST: ${OPENWA_DATABASE_HOST}
+      DATABASE_PORT: ${OPENWA_DATABASE_PORT}
+      DATABASE_NAME: ${OPENWA_DATABASE_NAME}
+      DATABASE_USERNAME: ${OPENWA_DATABASE_USERNAME}
+      DATABASE_POOL_SIZE: ${OPENWA_DATABASE_POOL_SIZE}
+      POSTGRES_SCHEMA: ${OPENWA_POSTGRES_SCHEMA}
+      DATABASE_SSL: ${OPENWA_DATABASE_SSL}
+      ENGINE_TYPE: ${OPENWA_ENGINE_TYPE}
+      PUPPETEER_HEADLESS: ${OPENWA_PUPPETEER_HEADLESS}
+      SESSION_DATA_PATH: ${OPENWA_SESSION_DATA_PATH}
+      PUPPETEER_ARGS: ${OPENWA_PUPPETEER_ARGS}
+      INBOUND_MEDIA_CONCURRENCY: ${OPENWA_INBOUND_MEDIA_CONCURRENCY}
+      INBOUND_MEDIA_GLOBAL_CONCURRENCY: ${OPENWA_INBOUND_MEDIA_GLOBAL_CONCURRENCY}
+      MEDIA_DOWNLOAD_MAX_BYTES: ${OPENWA_MEDIA_DOWNLOAD_MAX_BYTES}
+      LID_MAPPING_CACHE_MAX: ${OPENWA_LID_MAPPING_CACHE_MAX}
+      DOCKER_HOST: ${OPENWA_DOCKER_HOST:?}
+      REDIS_ENABLED: ${OPENWA_REDIS_ENABLED}
+      REDIS_BUILTIN: ${OPENWA_REDIS_BUILTIN}
+      CACHE_ENABLED: ${OPENWA_CACHE_ENABLED}
+      REDIS_HOST: ${OPENWA_REDIS_HOST}
+      REDIS_PORT: ${OPENWA_REDIS_PORT}
+      REDIS_USERNAME: ${OPENWA_REDIS_USERNAME}
+      REDIS_CACHE_DB: ${OPENWA_REDIS_CACHE_DB}
+      QUEUE_ENABLED: ${OPENWA_QUEUE_ENABLED}
+      STORAGE_TYPE: ${OPENWA_STORAGE_TYPE}
+      STORAGE_LOCAL_PATH: ${OPENWA_STORAGE_LOCAL_PATH}
+      AUTO_START_SESSIONS: ${OPENWA_AUTO_START_SESSIONS}
+      BASE_URL: ${OPENWA_PUBLIC_BASE_URL}
+      CORS_ORIGINS: ${OPENWA_CORS_ORIGINS}
+      PORT: ${OPENWA_INTERNAL_PORT:?}
+    read_only: true
+    dns:
+      - ${OPENWA_DNS_PRIMARY:?}
+      - ${OPENWA_DNS_SECONDARY:?}
+    networks:
+      - postgres_net
+      - redis_net
+      - traefik_net
+      - openwa_net
+      - network_socket_net
+    volumes:
+      - type: volume
+        source: openwa_data
+        target: /app/data
+    tmpfs:
+      - /tmp:size=256m
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:${OPENWA_INTERNAL_PORT:?}/',function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)})\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
+    deploy:
+      resources:
+        limits:
+          cpus: "${OPENWA_LIMIT_CPUS:?}"
+          memory: "${OPENWA_LIMIT_MEMORY:?}"
+          pids: "${OPENWA_LIMIT_PIDS:?}"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik_net"
+      traefik.http.routers.openwa-public.rule: "Host(`${OPENWA_HOST:?}`) && PathPrefix(`${OPENWA_PUBLIC_PREFIX:?}`)"
+      traefik.http.routers.openwa-public.priority: "100"
+      traefik.http.routers.openwa-public.entrypoints: "websecure"
+      traefik.http.routers.openwa-public.tls: "true"
+      traefik.http.routers.openwa-public.service: "openwa"
+      traefik.http.routers.openwa-private.rule: "Host(`${OPENWA_HOST:?}`)"
+      traefik.http.routers.openwa-private.priority: "10"
+      traefik.http.routers.openwa-private.entrypoints: "websecure"
+      traefik.http.routers.openwa-private.middlewares: "tailnet-only@docker"
+      traefik.http.routers.openwa-private.tls: "true"
+      traefik.http.routers.openwa-private.service: "openwa"
+      traefik.http.services.openwa.loadbalancer.server.port: "${OPENWA_INTERNAL_PORT:?}"
+
+networks:
+  postgres_net:
+    external: true
+    name: postgres_net
+  redis_net:
+    external: true
+    name: redis_net
+  traefik_net:
+    external: true
+    name: traefik_net
+  openwa_net:
+    external: true
+    name: openwa_net
+  network_socket_net:
+    external: true
+    name: network_socket_net
+
+volumes:
+  openwa_data:
+    name: openwa_data
