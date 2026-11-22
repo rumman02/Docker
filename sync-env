@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""
+sync-env: Propagates shared environment variables from .env.global and .env.local into all stack .env files.
+
+Prefix-based auto-routing:
+- Keys starting with <STACK>_ (e.g. NETWORK_*, N8N_*, DATABASE_*) auto-route to <stack>/.env.
+- Unprefixed keys route only to stacks whose compose.yaml or .env values
+  interpolate them (e.g. TZ; a stack may alias a global locally,
+  e.g. network DNS_DOMAIN=${BASE_DOMAIN:?}, openwa OPENWA_TZ=${TZ:?}).
+- Automatically cleans up obsolete unprefixed keys when replaced by prefixed keys.
+- Preserves all stack-specific configurations (ports, image tags, passwords, limits).
+"""
+
+import os
+import re
+import sys
+import subprocess
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+GLOBAL_ENV_PATH = os.path.join(SCRIPT_DIR, ".env.global")
+LOCAL_ENV_PATH = os.path.join(SCRIPT_DIR, ".env.local")
+
+# Unprefixed keys written into EVERY stack .env regardless of references.
+# Empty today: every global key (BASE_DOMAIN included) routes by reference only —
+# a stack whose compose.yaml/.env never interpolates a key keeps no copy of it.
+GLOBAL_ALWAYS = ()
+
+# Missing keys in this set insert after the DOMAIN/TIMEZONE section header,
+# never into the secrets section.
+DOMAIN_SECTION_KEYS = ("BASE_DOMAIN", "DNS_DOMAIN", "TZ", "GENERIC_TIMEZONE")
+
+def parse_env_file(filepath):
+    vars_dict = {}
+    if not os.path.exists(filepath):
+        return vars_dict
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" in stripped:
+                k, v = stripped.split("=", 1)
+                vars_dict[k.strip()] = v.strip()
+    return vars_dict
+
+def references_key(text, key):
+    """True if any non-comment line interpolates key (${KEY}, ${KEY:?}, $KEY)."""
+    pattern = re.compile(r"\$\{?" + re.escape(key) + r"\b")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if pattern.search(line):
+            return True
+    return False
+
+def resolve_dk():
+    """Engine CLI per AGENTS.md §1.3: DK env var, else the DK= line in root .env, else docker."""
+    dk = os.environ.get("DK", "")
+    if not dk:
+        root_env = os.path.join(SCRIPT_DIR, ".env")
+        if os.path.exists(root_env):
+            with open(root_env, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("DK="):
+                        dk = line[3:].strip()
+                        break
+    return dk or "docker"
+
+def get_all_stacks():
+    return sorted([
+        d for d in os.listdir(SCRIPT_DIR)
+        if os.path.isdir(os.path.join(SCRIPT_DIR, d))
+        and not d.startswith(".")
+        and os.path.exists(os.path.join(SCRIPT_DIR, d, "compose.yaml"))
+    ])
+
+def categorize_vars(combined_vars, all_stacks):
+    # Map uppercase prefix to stack name: e.g. "NETWORK_" -> "network"
+    prefix_map = {s.upper() + "_": s for s in all_stacks}
+
+    global_vars = {}
+    stack_vars = {s: {} for s in all_stacks}
+
+    for k, v in combined_vars.items():
+        matched = False
+        # Check against stack prefixes
+        for prefix, s in prefix_map.items():
+            if k.startswith(prefix):
+                stack_vars[s][k] = v
+                matched = True
+                break
+        if not matched:
+            global_vars[k] = v
+
+    return global_vars, stack_vars
+
+def update_stack_env(stack_name, env_path, applicable_vars):
+    if not os.path.exists(env_path):
+        return False, "File does not exist"
+
+    with open(env_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # Identify any old obsolete unprefixed keys for this stack
+    # e.g. if NETWORK_CF_DNS_API_TOKEN is present, CF_DNS_API_TOKEN is obsolete
+    prefix = stack_name.upper() + "_"
+    obsolete_keys = set()
+    for k in applicable_vars:
+        if k.startswith(prefix):
+            unprefixed = k[len(prefix):]
+            obsolete_keys.add(unprefixed)
+
+    updated_lines = []
+    keys_present = set()
+    changed = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k, v = stripped.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+
+            # Clean up obsolete unprefixed key
+            if k in obsolete_keys:
+                changed = True
+                continue
+
+            if k in applicable_vars:
+                keys_present.add(k)
+                new_val = applicable_vars[k]
+                if v != new_val:
+                    indent = line[:len(line) - len(line.lstrip())]
+                    updated_lines.append(f"{indent}{k}={new_val}\n")
+                    changed = True
+                    continue
+            keys_present.add(k)
+        updated_lines.append(line)
+
+    # Check for missing keys that need to be injected
+    missing_keys = [k for k in applicable_vars if k not in keys_present]
+    if missing_keys:
+        changed = True
+        domain_keys = [k for k in missing_keys if k in DOMAIN_SECTION_KEYS]
+        secret_keys = [k for k in missing_keys if k not in domain_keys]
+
+        final_lines = []
+        inserted_domain = False
+        inserted_secrets = False
+
+        for line in updated_lines:
+            final_lines.append(line)
+            if not inserted_domain and ("DOMAIN" in line or "TIMEZONE" in line) and line.startswith("#"):
+                for dk in domain_keys:
+                    final_lines.append(f"{dk}={applicable_vars[dk]}\n")
+                inserted_domain = True
+            elif not inserted_secrets and ("SECRETS" in line or "HOST & CLOUD" in line) and line.startswith("#"):
+                for sk in secret_keys:
+                    final_lines.append(f"{sk}={applicable_vars[sk]}\n")
+                inserted_secrets = True
+
+        if not inserted_domain and domain_keys:
+            prepend = [f"{dk}={applicable_vars[dk]}\n" for dk in domain_keys]
+            final_lines = prepend + final_lines
+        if not inserted_secrets and secret_keys:
+            append = [f"{sk}={applicable_vars[sk]}\n" for sk in secret_keys]
+            final_lines.extend(append)
+
+        updated_lines = final_lines
+
+    if changed:
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(updated_lines)
+
+    return changed, "Updated" if changed else "Up to date"
+
+def main():
+    has_global = os.path.exists(GLOBAL_ENV_PATH)
+    has_local = os.path.exists(LOCAL_ENV_PATH)
+
+    if not has_global and not has_local:
+        print("Error: Neither .env.global nor .env.local found.")
+        print("Create them by copying templates:")
+        print("  cp .env.global.example .env.global")
+        print("  cp .env.local.example .env.local")
+        sys.exit(1)
+
+    combined_vars = {}
+    sources = []
+
+    if has_global:
+        g_vars = parse_env_file(GLOBAL_ENV_PATH)
+        combined_vars.update(g_vars)
+        sources.append(f".env.global ({len(g_vars)} vars)")
+    else:
+        print("Notice: .env.global not found, skipping global domain/timezone file.")
+
+    if has_local:
+        l_vars = parse_env_file(LOCAL_ENV_PATH)
+        combined_vars.update(l_vars)
+        sources.append(f".env.local ({len(l_vars)} vars)")
+    else:
+        print("Notice: .env.local not found, skipping local secrets/tokens file.")
+
+    if not combined_vars:
+        print("Warning: No variables found in .env.global or .env.local.")
+        sys.exit(0)
+
+    all_stacks = get_all_stacks()
+    global_vars, stack_vars = categorize_vars(combined_vars, all_stacks)
+
+    print(f"Loaded {len(combined_vars)} variables from {', '.join(sources)}:")
+    print(f"  - Global variables ({len(global_vars)}): {', '.join(global_vars.keys())}")
+    for s, sv in stack_vars.items():
+        if sv:
+            print(f"  - Stack {s} ({len(sv)}): {', '.join(sv.keys())}")
+
+    # Reference-aware routing: an unprefixed global key outside GLOBAL_ALWAYS is
+    # applied only to stacks that interpolate it — in compose.yaml or in .env
+    # values (a stack may alias a global locally, e.g. OPENWA_TZ=${TZ:?}).
+    routed = {k: [] for k in global_vars if k not in GLOBAL_ALWAYS}
+    applicable_by_stack = {}
+    for s in all_stacks:
+        env_file = os.path.join(SCRIPT_DIR, s, ".env")
+        if not os.path.exists(env_file):
+            applicable_by_stack[s] = None
+            continue
+
+        compose_text = ""
+        compose_path = os.path.join(SCRIPT_DIR, s, "compose.yaml")
+        if os.path.exists(compose_path):
+            with open(compose_path, "r", encoding="utf-8") as f:
+                compose_text = f.read()
+        with open(env_file, "r", encoding="utf-8") as f:
+            env_text = f.read()
+
+        applicable = {k: v for k, v in global_vars.items() if k in GLOBAL_ALWAYS}
+        for k, v in global_vars.items():
+            if k in GLOBAL_ALWAYS:
+                continue
+            if references_key(compose_text, k) or references_key(env_text, k):
+                applicable[k] = v
+                routed[k].append(s)
+        applicable.update(stack_vars.get(s, {}))
+        applicable_by_stack[s] = applicable
+
+    for k, stacks in routed.items():
+        print(f"  - {k} -> {', '.join(stacks) if stacks else '(no consuming stack)'}")
+
+    dk = resolve_dk()
+    results = []
+    for s in all_stacks:
+        applicable = applicable_by_stack[s]
+        if applicable is None:
+            results.append((s, False, "No .env file"))
+            continue
+
+        env_file = os.path.join(SCRIPT_DIR, s, ".env")
+
+        changed, msg = update_stack_env(s, env_file, applicable)
+
+        val = subprocess.run(
+            [dk, "compose", "config", "-q"],
+            cwd=os.path.join(SCRIPT_DIR, s),
+            capture_output=True,
+            text=True
+        )
+        if val.returncode == 0:
+            status = "VALID"
+        else:
+            status = f"ERROR: {val.stderr.strip()}"
+
+        results.append((s, changed, status))
+
+    print("\nSync Results:")
+    print("-" * 50)
+    for stack, changed, status in results:
+        change_indicator = "*" if changed else " "
+        print(f"[{status}] {change_indicator} {stack}")
+    print("-" * 50)
+    print("Done! (* indicates file was modified)")
+
+if __name__ == "__main__":
+    main()
