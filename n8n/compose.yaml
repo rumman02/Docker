@@ -1,0 +1,147 @@
+name: n8n
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+services:
+  n8n:
+    image: n8nio/n8n:${N8N_IMAGE_TAG:?}
+    container_name: n8n
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      TZ: ${TZ}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?}
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: ${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS}
+      NODE_FUNCTION_ALLOW_BUILTIN: ${NODE_FUNCTION_ALLOW_BUILTIN}
+      NODE_OPTIONS: ${NODE_OPTIONS}
+      DB_TYPE: ${DB_TYPE}
+      DB_POSTGRESDB_HOST: ${N8N_DB_HOST}
+      DB_POSTGRESDB_PORT: ${N8N_DB_PORT}
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER}
+      DB_POSTGRESDB_SCHEMA: ${N8N_DB_SCHEMA}
+      DB_POSTGRESDB_POOL_SIZE: ${DB_POSTGRESDB_POOL_SIZE}
+      N8N_PORT: ${N8N_PORT}
+      N8N_PROTOCOL: ${N8N_PROTOCOL}
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS}
+      N8N_UNVERIFIED_PACKAGES_ENABLED: ${N8N_UNVERIFIED_PACKAGES_ENABLED}
+      N8N_RUNNERS_MODE: ${N8N_RUNNERS_MODE}
+      N8N_RUNNERS_TASK_TIMEOUT: ${N8N_RUNNERS_TASK_TIMEOUT}
+      N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: ${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES}
+      N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: ${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES}
+      N8N_DIAGNOSTICS_ENABLED: ${N8N_DIAGNOSTICS_ENABLED}
+      N8N_HOST: ${N8N_HOST:?}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+    configs:
+      - source: dockerenv
+        target: /.dockerenv
+    dns:
+      - ${N8N_DNS_PRIMARY:?}
+      - ${N8N_DNS_SECONDARY:?}
+    networks:
+      - postgres_net
+      - redis_net
+      - traefik_net
+      - openwa_net
+      - omniroute_net
+      - browseforge_net
+      - postiz_net
+    volumes:
+      - type: volume
+        source: n8n_data
+        target: /home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:${N8N_INTERNAL_PORT:?}/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${N8N_LIMIT_CPUS:?}"
+          memory: "${N8N_LIMIT_MEMORY:?}"
+          pids: "${N8N_LIMIT_PIDS:?}"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik_net"
+      traefik.http.routers.n8n-public.rule: "Host(`${N8N_HOST:?}`) && (PathPrefix(`${N8N_PUBLIC_PREFIX_PRIMARY:?}`) || PathPrefix(`${N8N_PUBLIC_PREFIX_SECONDARY:?}`))"
+      traefik.http.routers.n8n-public.priority: "100"
+      traefik.http.routers.n8n-public.entrypoints: "websecure"
+      traefik.http.routers.n8n-public.tls: "true"
+      traefik.http.routers.n8n-public.service: "n8n"
+      traefik.http.routers.n8n-private.rule: "Host(`${N8N_HOST:?}`)"
+      traefik.http.routers.n8n-private.priority: "10"
+      traefik.http.routers.n8n-private.entrypoints: "websecure"
+      traefik.http.routers.n8n-private.middlewares: "tailnet-only@docker"
+      traefik.http.routers.n8n-private.tls: "true"
+      traefik.http.routers.n8n-private.service: "n8n"
+      traefik.http.services.n8n.loadbalancer.server.port: "${N8N_INTERNAL_PORT:?}"
+
+  runner:
+    image: n8nio/runners:${N8N_RUNNER_IMAGE_TAG:?}
+    container_name: n8n_runner
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      n8n:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?}
+      N8N_RUNNERS_TASK_BROKER_URI: ${N8N_RUNNER_TASK_BROKER_URI}
+      N8N_RUNNERS_LAUNCHER_HEALTH_CHECK_PORT: ${N8N_RUNNER_LAUNCHER_HEALTH_CHECK_PORT}
+    network_mode: "service:n8n"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:${N8N_RUNNER_LAUNCHER_HEALTH_CHECK_PORT:?}/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${N8N_RUNNER_LIMIT_CPUS:?}"
+          memory: "${N8N_RUNNER_LIMIT_MEMORY:?}"
+          pids: "${N8N_RUNNER_LIMIT_PIDS:?}"
+
+networks:
+  postgres_net:
+    external: true
+    name: postgres_net
+  redis_net:
+    external: true
+    name: redis_net
+  traefik_net:
+    external: true
+    name: traefik_net
+  openwa_net:
+    external: true
+    name: openwa_net
+  omniroute_net:
+    external: true
+    name: omniroute_net
+  browseforge_net:
+    external: true
+    name: browseforge_net
+  postiz_net:
+    external: true
+    name: postiz_net
+
+volumes:
+  n8n_data:
+    name: n8n_data
+
+configs:
+  dockerenv:
+    content: ""
